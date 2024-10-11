@@ -45,14 +45,27 @@ func Parse(
 	htmlInput *strings.Reader,
 	buffer *bufio.Writer,
 ) {
-	doc, err := html.Parse(htmlInput)
+	scaffold, err := html.Parse(&strings.Reader{})
+	if err != nil {
+		panic(err)
+	}
+	body := scaffold.FirstChild.FirstChild.NextSibling
+
+	doc, err := html.ParseFragment(htmlInput, body)
 	if err != nil {
 		panic(err)
 	}
 
-	first := doc.FirstChild
-	modifyHTML(first, props, &Context{})
-	printHtml(first, &printHtmlArgs{-1, buffer})
+	context := &Context{}
+	for i, node := range doc {
+		if i == len(doc)-1 {
+			break
+		}
+		body.AppendChild(node)
+	}
+
+	modifyHTML(body, &modifyHTMLArgs{props, context})
+	recursiveMap(body, printHtml, &printHtmlArgs{2, buffer})
 }
 
 type printHtmlArgs struct {
@@ -63,54 +76,41 @@ type printHtmlArgs struct {
 func printHtml(n *html.Node, args *printHtmlArgs) {
 	depth := args.depth
 	buf := args.buf
-	if n.Type == html.TextNode && depth != -1 {
-		buf.WriteString(
-			fmt.Sprintf(
-				"%s%s\n",
-				strings.Repeat("  ", depth),
-				n.Data,
-			),
-		)
+
+	indent := strings.Repeat("\t", depth)
+
+	if n.Type == html.TextNode {
+		buf.WriteString(fmt.Sprintf("%s%s\n", indent, n.Data))
+		return
+	} else if n.Type == html.CommentNode {
+		buf.WriteString(fmt.Sprintf("%s<!--%s-->\n", indent, n.Data))
 		return
 	}
 
-	if n.Type == html.CommentNode {
-		buf.WriteString(fmt.Sprintf("<!--%s-->", n.Data))
-		recursiveMap(n, printHtml, &printHtmlArgs{depth + 1, buf})
-		return
-	}
+	if strings.HasPrefix(n.Data, "for") {
+		buf.WriteString(indent + n.Data + "\n")
+	} else {
+		buf.WriteString(indent + "<" + n.Data)
+		if n.Attr != nil {
+			for _, attr := range n.Attr {
+				buf.WriteString(" " + attr.Key + `="` + attr.Val + `"`)
 
-	if depth != -1 {
-		indent := strings.Repeat("  ", depth)
-		if strings.HasPrefix(n.Data, "for") {
-			buf.WriteString(indent + n.Data + "\n")
-		} else {
-			buf.WriteString(indent + "<" + n.Data)
-			if n.Attr != nil {
-				for _, attr := range n.Attr {
-					buf.WriteString(" " + attr.Key + `="` + attr.Val + `"`)
-
-					// If the attribute is an id, then we need to replace the prop name
-					// with the loop index
-					if attr.Key == "id" {
-						buf.WriteString(`{ "` + attr.Val + `" }`)
-					}
+				// If the attribute is an id, then we need to replace the prop name
+				// with the loop index
+				if attr.Key == "id" {
+					buf.WriteString(`{ "` + attr.Val + `" }`)
 				}
 			}
-			buf.WriteString(">\n")
 		}
+		buf.WriteString(">\n")
 	}
-
 	recursiveMap(n, printHtml, &printHtmlArgs{depth + 1, buf})
 
 	// If node starts with `for`
-	if depth != -1 {
-		indent := strings.Repeat("  ", depth)
-		if strings.HasPrefix(n.Data, "for") {
-			buf.WriteString(indent + "}\n")
-		} else {
-			buf.WriteString(indent + "</" + n.Data + ">\n")
-		}
+	if strings.HasPrefix(n.Data, "for") {
+		buf.WriteString(indent + "}\n")
+	} else {
+		buf.WriteString(indent + "</" + n.Data + ">\n")
 	}
 }
 
@@ -127,11 +127,15 @@ func findProps(props map[string]*Property, name string) *Property {
 	panic("Could not find prop")
 }
 
+type modifyHTMLArgs struct {
+	props   map[string]*Property
+	context *Context
+}
+
 func modifyHTML(
 	node *html.Node,
-	props map[string]*Property,
-	context *Context,
-) *html.Node {
+	args *modifyHTMLArgs,
+) {
 	// If the node has a class called `iter-[propName]--` then we need to
 	// replace the single child node with a loop.
 	if node.Type == html.ElementNode {
@@ -146,16 +150,18 @@ func modifyHTML(
 				propName := result[3]
 				indexName := result[4]
 
-				prevContext := setPrevContext(context)
-				context = &Context{
+				prevContext := setPrevContext(args.context)
+				args.context = &Context{
 					PropName:    propName,
 					LoopContext: &LoopContext{IndexName: indexName},
 					PrevContext: prevContext,
 				}
 
-				currentProp := findProps(props, propName)
+				currentProp := findProps(args.props, propName)
 				recursiveMap(
-					node, replaceNodeWithLoop, &PropertyWithContext{currentProp, context},
+					node, replaceNodeWithLoop, &PropertyWithContext{
+						currentProp, args.context,
+					},
 				)
 				break
 			}
@@ -167,40 +173,49 @@ func modifyHTML(
 				keyName := result[4]
 				valName := result[5]
 
-				prevContext := setPrevContext(context)
-				context = &Context{
+				prevContext := setPrevContext(args.context)
+				args.context = &Context{
 					PropName:    propName,
 					MapContext:  &MapContext{KeyName: keyName, ValName: valName},
 					PrevContext: prevContext,
 				}
 
-				currentProp := findProps(props, propName)
+				currentProp := findProps(args.props, propName)
 				recursiveMap(
-					node, replaceNodeWithMap, &PropertyWithContext{currentProp, context},
+					node, replaceNodeWithMap, &PropertyWithContext{
+						currentProp, args.context,
+					},
 				)
 				break
 			}
 		}
 	}
-	for c := node.FirstChild; c != nil; c = c.NextSibling {
-		modifyHTML(c, props, context)
+
+	if args.context.PrevContext != nil {
+		args.context = args.context.PrevContext
 	}
 
-	return node
+	recursiveMap(node, modifyHTML, args)
 }
 
 func replaceNodeWithLoop(
 	node *html.Node,
 	args *PropertyWithContext,
 ) {
-	first := node.FirstChild
+	if node.Type == html.CommentNode {
+		return
+	}
+	parent := node.Parent
 	recursiveMap(node, replaceListProp, args)
+	swapNodeChildren(parent, createNode(args.context))
+}
 
-	loopNode := createNode(args.context)
-
-	node.RemoveChild(first)
-	loopNode.AppendChild(first)
-	node.AppendChild(loopNode)
+func swapNodeChildren(parent *html.Node, node *html.Node) {
+	for c := parent.FirstChild; c != nil; c = parent.FirstChild {
+		parent.RemoveChild(c)
+		node.AppendChild(c)
+	}
+	parent.AppendChild(node)
 }
 
 func replaceListProp(
@@ -237,14 +252,12 @@ func replaceNodeWithMap(
 	node *html.Node,
 	args *PropertyWithContext,
 ) {
-	first := node.FirstChild
+	if node.Type == html.CommentNode {
+		return
+	}
+	parent := node.Parent
 	recursiveMap(node, replaceMapProp, args)
-
-	mapNode := createNode(args.context)
-
-	node.RemoveChild(first)
-	mapNode.AppendChild(first)
-	node.AppendChild(mapNode)
+	swapNodeChildren(parent, createNode(args.context))
 }
 
 func createNode(context *Context) *html.Node {
@@ -285,7 +298,6 @@ func replaceMapProp(node *html.Node, args *PropertyWithContext) {
 	if err != nil {
 		return
 	}
-
 	currentLine := context.MapContext.ValName + node.Data[index+len(propName)+1:]
 
 	// Given the current line and current prop, find the field that is being accessed
@@ -306,16 +318,15 @@ func replaceMapProp(node *html.Node, args *PropertyWithContext) {
 }
 
 func getPropIndex(node *html.Node, propName string) (int, error) {
-	index := strings.Index(node.Data, "."+propName)
-	if index == -1 {
-		return -1, fmt.Errorf("could not find the prop %s", propName)
+	if strings.Contains(node.Data, "."+propName) {
+		node.Data = strings.ReplaceAll(node.Data, "props.", ".")
+		index := strings.Index(node.Data, "."+propName)
+		if index == -1 {
+			return -1, fmt.Errorf("could not find the prop %s", propName)
+		}
+		return index, nil
 	}
-	node.Data = strings.ReplaceAll(node.Data, "props.", ".")
-	index -= 5 // Offset for the `props.` -> `.` replacement
-	if index < 0 {
-		panic("Negative index. This should not happen.")
-	}
-	return index, nil
+	return -1, fmt.Errorf("could not find the prop %s", propName)
 }
 
 func modifyNodeData(
@@ -329,15 +340,13 @@ func modifyNodeData(
 		typeCast = types.DefaultType
 	}
 
-	var trimmed string = strings.TrimSuffix(currentLine, ") }")
+	trimmed := strings.TrimSuffix(currentLine, " }")
+	trimmed = strings.TrimSuffix(trimmed, ")")
+
 	if typeCast == "" {
 		node.Data = "{ " + trimmed + " }"
 	} else {
-		// Note that `trimmed` still has the ) in this case. Why? I'm not sure but
-		// it works, so I'm not going to question it. Well, I am going to question
-		// it, but I'm not going to change it. Somewhere I messed up the recursion
-		// and I just patched on top of it.
-		node.Data = "{ " + typeCast + "(" + trimmed + " }"
+		node.Data = "{ " + typeCast + "(" + strings.TrimSuffix(trimmed, " }") + ")" + " }"
 	}
 }
 
@@ -352,10 +361,11 @@ func modifyNodeDataOther(
 	if !ok {
 		typeCast = types.DefaultType
 	}
+	trimmed := strings.Trim(strings.TrimSuffix(currentLine, " }"), ")")
 	if typeCast == "" {
-		node.Data = "{ " + strings.TrimSuffix(currentLine, " ) }") + " }"
+		node.Data = "{ " + trimmed + " }"
 	} else {
-		node.Data = "{ " + typeCast + "(" + currentLine
+		node.Data = "{ " + typeCast + "(" + trimmed + ")" + " }"
 	}
 }
 
@@ -411,6 +421,9 @@ func setPrevContext(context *Context) *Context {
 		}
 	} else {
 		prevContext = nil
+	}
+	if prevContext != nil && context.PrevContext != nil {
+		prevContext.PrevContext = context.PrevContext
 	}
 	return prevContext
 }
