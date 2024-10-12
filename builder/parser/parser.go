@@ -228,11 +228,7 @@ func replaceListProp(
 
 	propName := context.PropName
 
-	index, err := getPropIndex(node, propName)
-	if err != nil {
-		return
-	}
-
+	index := getPropIndex(node, propName)
 	currentLine := context.LoopContext.IndexName + node.Data[index+len(propName)+1:]
 	finalDotIndex := strings.LastIndex(currentLine, ".")
 	if finalDotIndex == -1 {
@@ -294,10 +290,7 @@ func replaceMapProp(node *html.Node, args *PropertyWithContext) {
 	context := args.context
 	propName := context.PropName
 
-	index, err := getPropIndex(node, propName)
-	if err != nil {
-		return
-	}
+	index := getPropIndex(node, propName)
 	currentLine := context.MapContext.ValName + node.Data[index+len(propName)+1:]
 
 	// Given the current line and current prop, find the field that is being accessed
@@ -317,16 +310,16 @@ func replaceMapProp(node *html.Node, args *PropertyWithContext) {
 	}
 }
 
-func getPropIndex(node *html.Node, propName string) (int, error) {
+func getPropIndex(node *html.Node, propName string) int {
 	if strings.Contains(node.Data, "."+propName) {
 		node.Data = strings.ReplaceAll(node.Data, "props.", ".")
 		index := strings.Index(node.Data, "."+propName)
 		if index == -1 {
-			return -1, fmt.Errorf("could not find the prop %s", propName)
+			panic("Could not find the prop")
 		}
-		return index, nil
+		return index
 	}
-	return -1, fmt.Errorf("could not find the prop %s", propName)
+	panic("Could not find the prop")
 }
 
 func modifyNodeData(
