@@ -26,8 +26,15 @@ func main() {
 	calledFromDir := strings.ReplaceAll(string(output), "\\", "/")
 	calledFromDir = strings.Trim(calledFromDir, "\n")
 
+	// Check if we are running on windows
+	goos, found := os.LookupEnv("OS")
+	if !found {
+		panic("GOOS not found")
+	}
+	goos = strings.ToLower(goos)
+
 	// Convert the path to a windows path
-	if calledFromDir[0] == '/' {
+	if calledFromDir[0] == '/' && strings.Contains(goos, "win") {
 		calledFromDir = calledFromDir[2:]
 		calledFromDir = "C:" + calledFromDir
 	}
