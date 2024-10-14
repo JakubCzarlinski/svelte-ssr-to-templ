@@ -29,7 +29,7 @@ func main() {
 	// Check if we are running on windows
 	goos, found := os.LookupEnv("OS")
 	if !found {
-		panic("GOOS not found")
+		panic("OS not found")
 	}
 	goos = strings.ToLower(goos)
 
