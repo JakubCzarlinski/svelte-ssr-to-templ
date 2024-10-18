@@ -28,6 +28,7 @@ type BuildOptions struct {
 	QueueDir       string // Relative path
 	OutputBuildDir string // Relative path
 	WaitGroup      *errgroup.Group
+	GitHash        string // Git hash of the current commit
 }
 
 // Recursively process all files in the queue directory
@@ -351,7 +352,20 @@ type %sProps struct {
 	scanner := bufio.NewScanner(headFile)
 	fmt.Fprintf(outputFile, "var %sHead = [...]string{\n", *filename)
 	for scanner.Scan() {
-		fmt.Fprintf(outputFile, "\t`%s`,\n", scanner.Text())
+		text := scanner.Text()
+		// Find the "/assets/[filename].ext" part of the string and replace it with
+		// "/assets/[filename]-[gitHash].ext"
+		indexStart := strings.Index(text, `href="/assets/`)
+		if indexStart == -1 {
+			fmt.Fprintf(outputFile, "\t`%s`,\n", text)
+			continue
+		}
+		extIndex := strings.LastIndex(text, ".")
+		if extIndex == -1 {
+			fmt.Fprintf(outputFile, "\t`%s`,\n", text)
+			continue
+		}
+		fmt.Fprintf(outputFile, "\t`%s-%s%s`,\n", text[:extIndex], opts.GitHash, text[extIndex:])
 	}
 	fmt.Fprintln(outputFile, "}")
 }
