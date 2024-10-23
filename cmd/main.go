@@ -13,7 +13,7 @@ import (
 var (
 	queueDir       = flag.String("in", "", "Directory containing the files to be processed")
 	outputBuildDir = flag.String("out", "", "Directory to output the built files")
-	gitHash        = flag.String("gitHash", "", "The git hash of the current commit")
+	hash           = flag.String("hash", "", "The hash to suffix the output files with")
 )
 
 func main() {
@@ -44,7 +44,7 @@ func main() {
 		QueueDir:       *queueDir,
 		OutputBuildDir: *outputBuildDir,
 		WaitGroup:      &errgroup.Group{},
-		GitHash:        *gitHash,
+		Hash:           *hash,
 	}
 
 	if buildOpts.QueueDir == "" {

@@ -28,7 +28,7 @@ type BuildOptions struct {
 	QueueDir       string // Relative path
 	OutputBuildDir string // Relative path
 	WaitGroup      *errgroup.Group
-	GitHash        string // Git hash of the current commit
+	Hash           string
 }
 
 // Recursively process all files in the queue directory
@@ -373,7 +373,7 @@ type %sProps struct {
 			fmt.Fprintf(outputFile, "\t`%s`,\n", text)
 			continue
 		}
-		fmt.Fprintf(outputFile, "\t`%s-%s%s`,\n", text[:extIndex], opts.GitHash, text[extIndex:])
+		fmt.Fprintf(outputFile, "\t`%s-%s%s`,\n", text[:extIndex], opts.Hash, text[extIndex:])
 	}
 	fmt.Fprintln(outputFile, "}")
 }
