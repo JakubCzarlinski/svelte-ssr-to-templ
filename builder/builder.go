@@ -198,7 +198,7 @@ func addHeadContent(headContents map[string]struct{}) {
 	writer.WriteString("templ Home(props *" + strings.TrimSuffix(filename, ".html") + `Props, headContents map[string]struct{}) {
 	{{ addHeadContent(headContents) }}
 `)
-	writer.WriteString("\t<div class=\"" + packageName + "\" svelte={ marshalProps(props) }>\n")
+	writer.WriteString("\t<div class=\"" + packageName + "\" data-svelte={ marshalProps(props) }>\n")
 
 	for scanner.Scan() {
 		line := scanner.Text()
